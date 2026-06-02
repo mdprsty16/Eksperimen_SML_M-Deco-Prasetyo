@@ -1,96 +1,36 @@
-name: Insurance Data Preprocessing Pipeline
+name: Automasi Preprocessing Data
 
 on:
   push:
     branches:
       - main
-    paths:
-      - 'insurance_raw/**'
-      - 'preprocessing/automate_*.py'
-      - '.github/workflows/preprocessing.yml'
-  pull_request:
-    branches:
-      - main
-  workflow_dispatch:  # Allow manual trigger
+  workflow_dispatch: 
 
 jobs:
-  preprocess:
+  run-preprocessing:
     runs-on: ubuntu-latest
-    
+
     steps:
-      # Step 1: Checkout repository
-      - name: Checkout repository
-        uses: actions/checkout@v3
-        with:
-          fetch-depth: 0
-      
-      # Step 2: Set up Python environment
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.11'
-          cache: 'pip'
-      
-      # Step 3: Install dependencies
-      - name: Install required packages
-        run: |
-          python -m pip install --upgrade pip
-          pip install pandas numpy scikit-learn matplotlib seaborn
-      
-      # Step 4: Run preprocessing pipeline
-      - name: Run preprocessing automation
-        working-directory: preprocessing
-        run: |
-          python automate_M-Deco-Prasetyo.py
-          echo "Preprocessing completed successfully!"
-      
-      # Step 5: Verify output files
-      - name: Verify output files
-        run: |
-          ls -lh preprocessing/insurance_preprocessing/
-          echo "Files created:"
-          file preprocessing/insurance_preprocessing/*
-      
-      # Step 6: Commit and push preprocessed data
-      - name: Commit preprocessed data
-        run: |
-          git config user.name "GitHub Actions Bot"
-          git config user.email "actions@github.com"
-          
-          # Check if there are changes
-          if git diff --quiet; then
-            echo "No changes to commit"
-          else
-            git add preprocessing/insurance_preprocessing/
-            git commit -m "chore: update preprocessed dataset [skip ci]"
-            git push origin main
-          fi
-      
-      # Step 7: Upload preprocessed data as artifact
-      - name: Upload preprocessed data
-        uses: actions/upload-artifact@v3
-        with:
-          name: insurance-preprocessed-data
-          path: preprocessing/insurance_preprocessing/
-          retention-days: 30
-      
-      # Step 8: Create summary report
-      - name: Generate job summary
-        run: |
-          echo "## Preprocessing Pipeline Execution Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Dataset Information:" >> $GITHUB_STEP_SUMMARY
-          echo "- **Status**: ✅ Completed Successfully" >> $GITHUB_STEP_SUMMARY
-          echo "- **Timestamp**: $(date -u +'%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Output Files:" >> $GITHUB_STEP_SUMMARY
-          echo "- \`insurance_preprocessed.csv\`" >> $GITHUB_STEP_SUMMARY
-          echo "- \`preprocessing_report.txt\`" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Processing Steps:" >> $GITHUB_STEP_SUMMARY
-          echo "1. ✅ Data loading from raw CSV" >> $GITHUB_STEP_SUMMARY
-          echo "2. ✅ Data quality check" >> $GITHUB_STEP_SUMMARY
-          echo "3. ✅ Duplicate removal" >> $GITHUB_STEP_SUMMARY
-          echo "4. ✅ Categorical encoding" >> $GITHUB_STEP_SUMMARY
-          echo "5. ✅ Feature standardization" >> $GITHUB_STEP_SUMMARY
-          echo "6. ✅ Report generation" >> $GITHUB_STEP_SUMMARY
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12.7'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pandas scikit-learn numpy
+
+    - name: Run preprocessing script
+      run: |
+        cd preprocessing
+        python "automate_M-Deco-Prasetyo.py"
+
+    - name: Upload Processed Data
+      uses: actions/upload-artifact@v4
+      with:
+        name: dataset-siap-latih
+        path: preprocessing/insurance_preprocessing/
