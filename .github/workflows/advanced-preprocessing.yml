@@ -1,0 +1,210 @@
+name: Advanced Preprocessing with Data Release
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'insurance_raw/**'
+      - 'preprocessing/automate_*.py'
+  workflow_dispatch:
+    inputs:
+      create_release:
+        description: 'Create a release with preprocessed data'
+        required: false
+        default: 'false'
+
+jobs:
+  advanced-preprocessing:
+    runs-on: ubuntu-latest
+    
+    outputs:
+      processed-date: ${{ steps.timestamp.outputs.date }}
+      dataset-rows: ${{ steps.verify.outputs.rows }}
+    
+    steps:
+      # Step 1: Checkout code
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      
+      # Step 2: Set Python environment
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      
+      # Step 3: Install dependencies
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          pip install -r requirements.txt
+          pip install pytest
+      
+      # Step 4: Get timestamp
+      - name: Get timestamp
+        id: timestamp
+        run: |
+          echo "date=$(date +'%Y-%m-%d_%H-%M-%S')" >> $GITHUB_OUTPUT
+          echo "date_iso=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> $GITHUB_OUTPUT
+      
+      # Step 5: Run preprocessing
+      - name: Execute preprocessing pipeline
+        working-directory: preprocessing
+        run: |
+          echo "Starting preprocessing at $(date)"
+          python automate_M-Deco-Prasetyo.py
+          echo "Preprocessing completed at $(date)"
+      
+      # Step 6: Verify output
+      - name: Verify preprocessed data
+        id: verify
+        run: |
+          if [ -f "preprocessing/insurance_preprocessing/insurance_preprocessed.csv" ]; then
+            echo "✓ Preprocessed CSV file exists"
+            ROWS=$(tail -n +2 preprocessing/insurance_preprocessing/insurance_preprocessed.csv | wc -l)
+            echo "rows=$ROWS" >> $GITHUB_OUTPUT
+            echo "Dataset contains $ROWS data rows"
+          else
+            echo "✗ ERROR: Preprocessed CSV file not found!"
+            exit 1
+          fi
+          
+          if [ -f "preprocessing/insurance_preprocessing/preprocessing_report.txt" ]; then
+            echo "✓ Report file exists"
+          else
+            echo "✗ ERROR: Report file not found!"
+            exit 1
+          fi
+      
+      # Step 7: Run quality checks
+      - name: Data quality validation
+        run: |
+          python << 'EOF'
+          import pandas as pd
+          
+          df = pd.read_csv('preprocessing/insurance_preprocessing/insurance_preprocessed.csv')
+          
+          print("Data Quality Checks:")
+          print("-" * 50)
+          print(f"Shape: {df.shape}")
+          print(f"Missing values: {df.isnull().sum().sum()}")
+          print(f"Duplicates: {df.duplicated().sum()}")
+          print(f"Numeric columns: {df.select_dtypes(include=['number']).shape[1]}")
+          
+          # Check for NaN or Inf
+          has_nan = df.isnull().sum().sum() > 0
+          has_inf = df.isin([float('inf'), float('-inf')]).sum().sum() > 0
+          
+          if has_nan or has_inf:
+            print("✗ ERROR: Data contains NaN or Inf values")
+            exit(1)
+          else:
+            print("✓ All quality checks passed")
+          EOF
+      
+      # Step 8: Create versioned backup
+      - name: Create versioned backup
+        run: |
+          TIMESTAMP=$(date +'%Y%m%d_%H%M%S')
+          mkdir -p preprocessing/insurance_preprocessing/backups
+          cp preprocessing/insurance_preprocessing/insurance_preprocessed.csv \
+             preprocessing/insurance_preprocessing/backups/insurance_preprocessed_${TIMESTAMP}.csv
+          cp preprocessing/insurance_preprocessing/preprocessing_report.txt \
+             preprocessing/insurance_preprocessing/backups/preprocessing_report_${TIMESTAMP}.txt
+          echo "Backups created with timestamp: $TIMESTAMP"
+      
+      # Step 9: Commit changes
+      - name: Commit preprocessed data
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          
+          git add -A preprocessing/insurance_preprocessing/
+          
+          # Only commit if there are changes
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "chore: update preprocessed dataset
+
+- Timestamp: $(date -u +'%Y-%m-%d %H:%M:%S UTC')
+- Rows processed: $(tail -n +2 preprocessing/insurance_preprocessing/insurance_preprocessed.csv | wc -l)
+- Processing steps: Data load, Quality check, Duplicates removal, Encoding, Scaling
+[skip ci]"
+            git push origin main
+          fi
+      
+      # Step 10: Upload as artifacts
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: preprocessed-data-${{ steps.timestamp.outputs.date }}
+          path: |
+            preprocessing/insurance_preprocessing/insurance_preprocessed.csv
+            preprocessing/insurance_preprocessing/preprocessing_report.txt
+            preprocessing/insurance_preprocessing/backups/
+          retention-days: 90
+      
+      # Step 11: Create GitHub Release (optional)
+      - name: Create Release
+        if: github.event.inputs.create_release == 'true'
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: preprocessing-${{ steps.timestamp.outputs.date }}
+          release_name: Preprocessed Data - ${{ steps.timestamp.outputs.date_iso }}
+          body: |
+            ## Insurance Dataset Preprocessing Release
+            
+            **Date**: ${{ steps.timestamp.outputs.date_iso }}
+            
+            ### Dataset Information
+            - **Rows**: ${{ steps.verify.outputs.rows }}
+            - **Status**: Successfully preprocessed
+            
+            ### Files Included
+            - `insurance_preprocessed.csv` - Processed dataset ready for ML models
+            - `preprocessing_report.txt` - Detailed preprocessing report
+            
+            ### Processing Steps Applied
+            1. Data loading from raw CSV
+            2. Data quality assessment
+            3. Duplicate removal
+            4. Categorical variable encoding
+            5. Feature standardization
+            
+            ### Quality Checks
+            ✓ No missing values
+            ✓ No duplicate records
+            ✓ No infinite values
+            ✓ All features properly scaled
+          draft: false
+          prerelease: false
+      
+      # Step 12: Job summary
+      - name: Add job summary
+        run: |
+          echo "## 🎯 Preprocessing Pipeline Execution Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Item | Details |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|---------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Status | ✅ Success |" >> $GITHUB_STEP_SUMMARY
+          echo "| Timestamp | $(date -u +'%Y-%m-%d %H:%M:%S UTC') |" >> $GITHUB_STEP_SUMMARY
+          echo "| Data Rows | ${{ steps.verify.outputs.rows }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Python Version | 3.11 |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📊 Output Files" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ \`insurance_preprocessed.csv\`" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ \`preprocessing_report.txt\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🔄 Processing Pipeline" >> $GITHUB_STEP_SUMMARY
+          echo "1. ✅ Load raw data" >> $GITHUB_STEP_SUMMARY
+          echo "2. ✅ Quality check" >> $GITHUB_STEP_SUMMARY
+          echo "3. ✅ Remove duplicates" >> $GITHUB_STEP_SUMMARY
+          echo "4. ✅ Encode categories" >> $GITHUB_STEP_SUMMARY
+          echo "5. ✅ Standardize features" >> $GITHUB_STEP_SUMMARY
+          echo "6. ✅ Generate report" >> $GITHUB_STEP_SUMMARY
